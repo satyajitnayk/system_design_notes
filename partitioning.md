@@ -220,3 +220,116 @@ Think of partitioning as:
 If your query doesn't filter by that key → you scan everything.
 
 ---
+
+# 13. EXPLAIN vs EXPLAIN ANALYZE (Clarity Section)
+
+## A. EXPLAIN (With Partition Pruning)
+
+```sql
+EXPLAIN
+SELECT *
+FROM events_partitioned
+WHERE created_at >= '2025-01-01'
+  AND created_at < '2026-01-01';
+```
+
+Typical Output (Pruning Happens):
+
+```
+id: 1
+select_type: SIMPLE
+table: events_partitioned
+partitions: p2025
+type: range
+possible_keys: PRIMARY
+key: PRIMARY
+rows: 120000
+Extra: Using where
+```
+
+Key Insight:
+
+* partitions: p2025 → only one partition scanned
+* rows → estimated rows scanned
+
+---
+
+## B. EXPLAIN (No Partition Filter)
+
+```sql
+EXPLAIN
+SELECT user_id, SUM(amount)
+FROM events_partitioned
+GROUP BY user_id;
+```
+
+Typical Output (No Pruning):
+
+```
+id: 1
+select_type: SIMPLE
+table: events_partitioned
+partitions: p2023,p2024,p2025,pmax
+type: index
+key: idx_user_id
+rows: 950000
+Extra: Using index
+```
+
+Key Insight:
+
+* All partitions scanned
+* Partitioning does NOT help global aggregation
+
+---
+
+## C. EXPLAIN ANALYZE (MySQL 8+)
+
+```sql
+EXPLAIN ANALYZE
+SELECT *
+FROM events_partitioned
+WHERE created_at >= '2025-01-01'
+  AND created_at < '2026-01-01';
+```
+
+Typical Output:
+
+```
+-> Filter: (created_at >= '2025-01-01' and created_at < '2026-01-01')
+    -> Table scan on events_partitioned partition p2025
+       rows=120000  cost=12000
+       actual rows=118532  loops=1
+```
+
+Key Differences vs EXPLAIN:
+
+EXPLAIN:
+
+* Shows estimated plan
+* Uses optimizer statistics
+
+EXPLAIN ANALYZE:
+
+* Executes query
+* Shows actual rows scanned
+* Shows real execution timing
+* Best tool to verify pruning + performance
+
+---
+
+## D. How to Validate Partitioning Correctly
+
+1. Run EXPLAIN
+2. Check "partitions" column
+3. Run EXPLAIN ANALYZE
+4. Confirm only expected partition scanned
+
+If more partitions appear than expected →
+
+* Query is not aligned with partition key
+* Boundaries may be wrong
+
+---
+
+END
